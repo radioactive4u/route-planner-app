@@ -1,12 +1,13 @@
 import React, { useState } from "react";
-import { MapContainer, TileLayer, Polyline, Marker, Popup } from "react-leaflet";
+import { MapContainer, TileLayer, Polyline, Marker, Popup, useMapEvents } from "react-leaflet";
 import { v4 as uuidv4 } from "uuid";
+import L from "leaflet";
 
 interface Stop {
   id: string;
   address: string;
-  lat?: number;
-  lon?: number;
+  lat: number;
+  lon: number;
   checked: boolean;
   eta?: string;
 }
@@ -18,9 +19,7 @@ export default function RoutePlannerApp() {
   const [polylineCoords, setPolylineCoords] = useState<[number, number][]>([]);
 
   const geocodeAddress = async (address: string) => {
-    const response = await fetch(
-      \`https://nominatim.openstreetmap.org/search?format=json&q=\${encodeURIComponent(address)}\`
-    );
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`);
     const data = await response.json();
     if (data && data.length > 0) {
       return {
@@ -52,46 +51,45 @@ export default function RoutePlannerApp() {
   };
 
   const optimizeRoute = async () => {
-    const coords = stops
-      .map((s) => (s.lat && s.lon ? \`\${s.lon},\${s.lat}\` : null))
-      .filter(Boolean)
-      .join(";");
-    const response = await fetch(
-      \`https://router.project-osrm.org/trip/v1/driving/\${coords}?source=first&roundtrip=false&overview=full\`
-    );
+    const coords = stops.map((s) => `${s.lon},${s.lat}`).join(";");
+    const response = await fetch(`https://router.project-osrm.org/trip/v1/driving/${coords}?source=first&roundtrip=false&overview=full`);
     const data = await response.json();
     if (data.code === "Ok") {
-      const newOrder = data.waypoints.map((wp) => wp.waypoint_index);
-      const reordered = newOrder.map((idx) => stops[idx]);
+      const newOrder = data.waypoints.map((wp: any) => stops[wp.waypoint_index]);
 
       let time = new Date();
-      const updated = reordered.map((s) => {
+      const updated = newOrder.map((s) => {
         const eta = new Date(time.getTime());
         time.setMinutes(time.getMinutes() + delayPerStop);
-        return { ...s, eta: eta.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+        return {
+          ...s,
+          eta: eta.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        };
       });
 
       setStops(updated);
-      const coordsArray = data.trips[0].geometry.coordinates.map(
-        ([lon, lat]: [number, number]) => [lat, lon]
-      );
+      const coordsArray = data.trips[0].geometry.coordinates.map(([lon, lat]: [number, number]) => [lat, lon]);
       setPolylineCoords(coordsArray);
     } else {
       alert("Route optimization failed.");
     }
   };
 
+  const updateStopPosition = (id: string, lat: number, lon: number) => {
+    const updatedStops = stops.map((s) =>
+      s.id === id ? { ...s, lat, lon } : s
+    );
+    setStops(updatedStops);
+    setPolylineCoords([]); // clear route so user can click "Optimize Route" again
+  };
+
   const getGoogleMapsLink = (address: string) =>
-    \`https://www.google.com/maps/dir/?api=1&destination=\${encodeURIComponent(address)}&travelmode=driving\`;
+    `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}&travelmode=driving`;
 
   return (
     <div>
       <h1>Route Planner</h1>
-      <input
-        value={newAddress}
-        onChange={(e) => setNewAddress(e.target.value)}
-        placeholder="Enter address"
-      />
+      <input value={newAddress} onChange={(e) => setNewAddress(e.target.value)} placeholder="Enter address" />
       <button onClick={addStop}>Add Stop</button>
       <button onClick={optimizeRoute}>Optimize Route</button>
       <label>
@@ -104,6 +102,7 @@ export default function RoutePlannerApp() {
           onChange={(e) => setDelayPerStop(parseInt(e.target.value))}
         />
       </label>
+
       <ul>
         {stops.map((s) => (
           <li key={s.id}>
@@ -114,16 +113,26 @@ export default function RoutePlannerApp() {
           </li>
         ))}
       </ul>
+
       <MapContainer center={[49.25, -123.1]} zoom={11} style={{ height: "400px", width: "100%" }}>
         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
         {polylineCoords.length > 0 && <Polyline positions={polylineCoords} color="blue" />}
-        {stops.map((s) =>
-          s.lat && s.lon ? (
-            <Marker key={s.id} position={[s.lat, s.lon]}>
-              <Popup>{s.address}</Popup>
-            </Marker>
-          ) : null
-        )}
+        {stops.map((s) => (
+          <Marker
+            key={s.id}
+            position={[s.lat, s.lon]}
+            draggable={true}
+            eventHandlers={{
+              dragend: (e) => {
+                const marker = e.target;
+                const position = marker.getLatLng();
+                updateStopPosition(s.id, position.lat, position.lng);
+              },
+            }}
+          >
+            <Popup>{s.address}</Popup>
+          </Marker>
+        ))}
       </MapContainer>
     </div>
   );
