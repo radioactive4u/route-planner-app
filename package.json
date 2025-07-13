@@ -1,7 +1,7 @@
 {
   "name": "route-planner-app",
   "version": "1.0.0",
-  "description": "A web app for planning routes on a map",
+  "description": "A route planning app",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
